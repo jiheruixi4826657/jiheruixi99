@@ -459,8 +459,9 @@
           </div>
           <div class="field">
             <label for="phone">手機號碼<span class="required">＊</span></label>
-            <input type="tel" id="phone" placeholder="09XXXXXXXX" autocomplete="tel" maxlength="10"/>
+            <input type="tel" id="phone" placeholder="09XXXXXXXX" autocomplete="tel" maxlength="10" pattern="09[0-9]{8}" inputmode="numeric"/>
             <p class="field-error" id="phone-error">請輸入有效的手機號碼（09 開頭共 10 碼）</p>
+            <p class="field-error" id="phone-dup-error" style="color:#b45309">此手機號碼已參加過抽獎，每人限抽一次</p>
           </div>
           <div class="field">
             <label>這是您第幾次造訪呢？<span class="required">＊</span></label>
@@ -694,7 +695,20 @@ function validate() {
   return ok;
 }
 
-/* ══ GAS ══ */
+/* ══ GAS：Server 端查重複 ══ */
+async function checkDuplicate(phone) {
+  if(GAS_ENDPOINT==='YOUR_APPS_SCRIPT_URL_HERE') return false;
+  try {
+    const res  = await fetch(`${GAS_ENDPOINT}?action=check&phone=${phone}`);
+    const json = await res.json();
+    return json.exists === true;
+  } catch(e) {
+    console.error('check error', e);
+    return false; // 查詢失敗時放行，讓 POST 端再防
+  }
+}
+
+/* ══ GAS：送出資料 ══ */
 async function submitToSheet(name,phone,visit,prizeId){
   if(GAS_ENDPOINT==='YOUR_APPS_SCRIPT_URL_HERE'){console.log('[Demo]',{name,phone,visit,prizeId});return}
   try{
@@ -976,15 +990,28 @@ function spawnConfetti(){
 document.getElementById('info-form').addEventListener('submit', async e=>{
   e.preventDefault();
   if(!validate()) return;
+
   const nameVal  = document.getElementById('name').value.trim();
   const phoneVal = document.getElementById('phone').value.replace(/\D/g,'');
   const visitVal = document.querySelector('input[name="visit"]:checked').value;
 
   const btn=document.getElementById('submit-btn');
   const lbl=document.getElementById('submit-label');
-  btn.disabled=true; lbl.textContent='送出中…';
-
+  btn.disabled=true; lbl.textContent='驗證中…';
   document.getElementById('loading-overlay').classList.add('active');
+
+  // ── Server 端查重複 ──
+  const isDup = await checkDuplicate(phoneVal);
+  if(isDup){
+    document.getElementById('loading-overlay').classList.remove('active');
+    btn.disabled=false; lbl.textContent='前往抽獎 ›';
+    document.getElementById('phone').classList.add('error');
+    document.getElementById('phone-dup-error').classList.add('visible');
+    document.getElementById('phone').scrollIntoView({behavior:'smooth',block:'center'});
+    return;
+  }
+
+  lbl.textContent='送出中…';
   const prize=drawPrize();
   await submitToSheet(nameVal,phoneVal,VISIT_LABELS[visitVal],prize.id);
   saveData(phoneVal,prize.id);
